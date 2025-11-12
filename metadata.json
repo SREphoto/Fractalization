@@ -1,0 +1,5 @@
+{
+  "name": "Copy of Copy of Copy of Fractallation v0.4",
+  "description": "An interactive web application to explore Mandelbrot and Julia set fractals. Adjust zoom, iterations, and other parameters to generate beautiful and complex fractal images.",
+  "requestFramePermissions": []
+}
