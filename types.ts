@@ -17,6 +17,13 @@ export enum ColorPalette {
   Forest = 'Forest',
 }
 
+export enum OrbitTrap {
+  None = 'None',
+  Point = 'Point',
+  Circle = 'Circle',
+  Cross = 'Cross',
+}
+
 export interface ControlParams {
   zoom: number;
   iterations: number;
@@ -25,6 +32,8 @@ export interface ControlParams {
   fractalType: FractalType;
   colorPalette: ColorPalette;
   mandelbulbIterations: number;
+  colorCycleSpeed: number;
+  orbitTrap: OrbitTrap;
 }
 
 export interface RenderParams extends ControlParams {

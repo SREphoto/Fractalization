@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { FractalType, ControlParams, RenderParams, ColorPalette } from './types';
+import { FractalType, ControlParams, RenderParams, ColorPalette, OrbitTrap } from './types';
 import FractalCanvas from './components/FractalCanvas';
 import Controls from './components/Controls';
 
@@ -20,6 +20,8 @@ const initialControlParams: ControlParams = {
   cImag: 0.01,
   colorPalette: ColorPalette.Viridis,
   mandelbulbIterations: 500,
+  colorCycleSpeed: 0,
+  orbitTrap: OrbitTrap.None,
 };
 
 const getInitialPan = (type: FractalType): { panX: number, panY: number } => {
@@ -47,7 +49,7 @@ const App: React.FC = () => {
     cameraDistance: 3.0,
     cameraTarget: { x: 0, y: 0 },
   });
-  const [isRendering, setIsRendering] = useState(true);
+  const [isRendering, setIsRendering] = useState(false);
   const [cameraRotation, setCameraRotation] = useState({ x: 0, y: 0 });
 
   const animationRef = useRef({
@@ -57,71 +59,39 @@ const App: React.FC = () => {
     animationFrameId: null as number | null,
   });
 
-  const ANIMATION_DURATION = 300; // ms
-
-  const is2DInteractive = (type: FractalType) =>
-    type === FractalType.Mandelbrot ||
-    type === FractalType.Julia ||
-    type === FractalType.BurningShip;
-
-  const easeInOutQuad = (t: number) => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-
-  const animateView = useCallback((timestamp: number) => {
-    if (!animationRef.current.startTime) {
-      animationRef.current.startTime = timestamp;
-    }
-
-    const elapsedTime = timestamp - animationRef.current.startTime;
-    const progress = Math.min(elapsedTime / ANIMATION_DURATION, 1);
-    const easedProgress = easeInOutQuad(progress);
-
-    const { startView, targetView } = animationRef.current;
-    
-    const nextPanX = startView.panX + (targetView.panX - startView.panX) * easedProgress;
-    const nextPanY = startView.panY + (targetView.panY - startView.panY) * easedProgress;
-    const nextZoom = startView.zoom + (targetView.zoom - startView.zoom) * easedProgress;
-
-    setRenderParams(prev => ({ ...prev, panX: nextPanX, panY: nextPanY, zoom: nextZoom }));
-
-    if (progress < 1) {
-      animationRef.current.animationFrameId = requestAnimationFrame(animateView);
-    } else {
-      animationRef.current.startTime = null;
-      animationRef.current.animationFrameId = null;
-      setIsRendering(false);
-    }
-  }, []);
-
   const handleRender = useCallback((newParams: ControlParams) => {
-    setIsRendering(true);
+    // For WebGL, we don't really need "isRendering" state to block UI, but we can keep it for Sierpinski
+    const isHeavy = newParams.fractalType === FractalType.Sierpinski;
+    if (isHeavy) setIsRendering(true);
+
     if (animationRef.current.animationFrameId) {
       cancelAnimationFrame(animationRef.current.animationFrameId);
       animationRef.current.animationFrameId = null;
     }
 
     setRenderParams(prevParams => {
-        const isTypeChange = prevParams.fractalType !== newParams.fractalType;
-        const initialPan = getInitialPan(newParams.fractalType);
-        
-        let cameraUpdates = {};
-        if (isTypeChange && newParams.fractalType === FractalType.Mandelbulb) {
-            setCameraRotation({ x: 0, y: 0 });
-            cameraUpdates = {
-                cameraDistance: 3.0,
-                cameraTarget: { x: 0, y: 0 },
-            };
-        }
+      const isTypeChange = prevParams.fractalType !== newParams.fractalType;
+      const initialPan = getInitialPan(newParams.fractalType);
 
-        return {
-            ...prevParams,
-            ...newParams,
-            ...cameraUpdates,
-            width: CANVAS_WIDTH,
-            height: CANVAS_HEIGHT,
-            zoom: newParams.zoom / 100,
-            panX: isTypeChange ? initialPan.panX : prevParams.panX,
-            panY: isTypeChange ? initialPan.panY : prevParams.panY,
+      let cameraUpdates = {};
+      if (isTypeChange && newParams.fractalType === FractalType.Mandelbulb) {
+        setCameraRotation({ x: 0, y: 0 });
+        cameraUpdates = {
+          cameraDistance: 3.0,
+          cameraTarget: { x: 0, y: 0 },
         };
+      }
+
+      return {
+        ...prevParams,
+        ...newParams,
+        ...cameraUpdates,
+        width: CANVAS_WIDTH,
+        height: CANVAS_HEIGHT,
+        zoom: newParams.zoom / 100,
+        panX: isTypeChange ? initialPan.panX : prevParams.panX,
+        panY: isTypeChange ? initialPan.panY : prevParams.panY,
+      };
     });
   }, []);
 
@@ -132,37 +102,23 @@ const App: React.FC = () => {
   }, []);
 
   const handleViewChange = useCallback((view: { panX: number; panY: number; zoom: number }) => {
-    if (!is2DInteractive(renderParams.fractalType)) {
-      setIsRendering(true);
-      setRenderParams(prevParams => ({ ...prevParams, ...view }));
-      return;
-    }
-    if (animationRef.current.animationFrameId) {
-      cancelAnimationFrame(animationRef.current.animationFrameId);
-    }
-    
-    setIsRendering(true);
-    animationRef.current.startTime = null;
-    animationRef.current.startView = { panX: renderParams.panX, panY: renderParams.panY, zoom: renderParams.zoom };
-    animationRef.current.targetView = view;
-    animationRef.current.animationFrameId = requestAnimationFrame(animateView);
-  }, [renderParams, animateView]);
+    setRenderParams(prevParams => ({ ...prevParams, ...view }));
+  }, []);
 
   const handleCameraChange = useCallback((changes: { rotation?: { x: number; y: number }; distance?: number; target?: { x: number; y: number } }) => {
     if (changes.rotation) {
-        setCameraRotation(changes.rotation);
+      setCameraRotation(changes.rotation);
     }
     if (changes.distance || changes.target) {
-        setRenderParams(prev => ({
-            ...prev,
-            cameraDistance: changes.distance ?? prev.cameraDistance,
-            cameraTarget: changes.target ?? prev.cameraTarget,
-        }));
+      setRenderParams(prev => ({
+        ...prev,
+        cameraDistance: changes.distance ?? prev.cameraDistance,
+        cameraTarget: changes.target ?? prev.cameraTarget,
+      }));
     }
   }, []);
-  
+
   const handleJuliaConstantChange = useCallback((constants: { cReal: number; cImag: number }) => {
-    setIsRendering(true);
     setRenderParams(prevParams => ({
       ...prevParams,
       cReal: constants.cReal,
@@ -181,6 +137,8 @@ const App: React.FC = () => {
       panX: renderParams.panX,
       panY: renderParams.panY,
       mandelbulbIterations: renderParams.mandelbulbIterations,
+      colorCycleSpeed: renderParams.colorCycleSpeed,
+      orbitTrap: renderParams.orbitTrap,
     };
     localStorage.setItem('fractalExplorerSettings', JSON.stringify(settingsToSave));
     alert('Current settings have been saved!');
@@ -194,7 +152,6 @@ const App: React.FC = () => {
         cancelAnimationFrame(animationRef.current.animationFrameId);
       }
       setIsRendering(true);
-      // Reset camera when loading settings for simplicity
       setCameraRotation({ x: 0, y: 0 });
       setRenderParams(prev => ({
         ...prev,
@@ -209,29 +166,50 @@ const App: React.FC = () => {
   }, []);
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 space-y-8">
-      <header className="text-center">
-        <h1 className="text-4xl font-bold tracking-tight text-white sm:text-6xl">Fractal Explorer</h1>
-        <p className="mt-4 text-lg text-gray-400">Explore the infinite complexity of mathematical beauty.</p>
+    <div className="min-h-screen bg-gray-900 text-white flex flex-col font-sans selection:bg-pink-500 selection:text-white">
+      <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 pointer-events-none"></div>
+
+      <header className="relative z-10 pt-8 pb-4 text-center">
+        <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-pink-500 via-purple-500 to-indigo-500 drop-shadow-lg">
+          Fractal Explorer
+        </h1>
+        <p className="mt-2 text-lg text-gray-400 font-light tracking-wide">
+          Dive into the infinite.
+        </p>
       </header>
-      <main className="w-full max-w-4xl flex flex-col items-center space-y-8">
-        <FractalCanvas
-          params={renderParams}
-          onRenderComplete={handleRenderComplete}
-          onViewChange={handleViewChange}
-          cameraRotation={cameraRotation}
-          onCameraChange={handleCameraChange}
-          onJuliaConstantChange={handleJuliaConstantChange}
-        />
-        <Controls
-          initialParams={initialControlParams}
-          currentParams={renderParams}
-          onRender={handleRender}
-          isRendering={isRendering}
-          onSaveSettings={handleSaveSettings}
-          onLoadSettings={handleLoadSettings}
-        />
+
+      <main className="relative z-10 flex-grow flex flex-col md:flex-row items-start justify-center p-4 gap-8 max-w-[1600px] mx-auto w-full">
+        <div className="flex-grow flex justify-center items-center w-full md:w-auto">
+          <div className="relative group">
+            <div className="absolute -inset-1 bg-gradient-to-r from-pink-600 to-purple-600 rounded-xl blur opacity-25 group-hover:opacity-50 transition duration-1000 group-hover:duration-200"></div>
+            <div className="relative bg-black rounded-xl p-1 shadow-2xl">
+              <FractalCanvas
+                params={renderParams}
+                onRenderComplete={handleRenderComplete}
+                onViewChange={handleViewChange}
+                cameraRotation={cameraRotation}
+                onCameraChange={handleCameraChange}
+                onJuliaConstantChange={handleJuliaConstantChange}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="w-full md:w-96 flex-shrink-0">
+          <Controls
+            initialParams={initialControlParams}
+            currentParams={renderParams}
+            onRender={handleRender}
+            isRendering={isRendering}
+            onSaveSettings={handleSaveSettings}
+            onLoadSettings={handleLoadSettings}
+          />
+        </div>
       </main>
+
+      <footer className="relative z-10 py-6 text-center text-gray-500 text-sm">
+        <p>© 2025 Fractal Explorer. Built with React & WebGL.</p>
+      </footer>
     </div>
   );
 };
